@@ -26,6 +26,7 @@ npm start
 ## 文档导航
 
 - 配置使用手册：`docs/配置使用手册.md`
+- 部署手册：`docs/部署手册.md`
 - 规则配置文件：`config/report-rules.json`
 - 环境变量示例：`.env.example`
 
@@ -49,6 +50,12 @@ node src/cli.js --month 2025-12 --debug-unmatched --limit 20
 REPORT_RULES_PATH=/your/path/report-rules.json npm start
 ```
 
+启用 API 鉴权：
+
+```bash
+REPORT_API_TOKEN=replace-with-a-strong-token npm start
+```
+
 ## Docker 镜像发布
 
 仓库已包含 GitHub Actions 多架构构建配置：
@@ -63,3 +70,5 @@ REPORT_RULES_PATH=/your/path/report-rules.json npm start
 - 镜像默认发布到 `ghcr.io/<owner>/<repo>`
 
 如果仓库启用了 GitHub Packages，使用内置 `GITHUB_TOKEN` 就可以推送到 GHCR。
+
+另外还包含一个常规 CI 工作流，会执行 `npm test` 和 Docker build 校验。

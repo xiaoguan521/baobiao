@@ -722,3 +722,8 @@ module.exports = {
   collectReportData,
   generateReport
 };
+
+module.exports.__test__ = {
+  compileContext,
+  matchOutlet
+};

@@ -6,7 +6,9 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "cli": "node src/cli.js"
+    "cli": "node src/cli.js",
+    "check": "node --check src/cli.js && node --check src/report-engine.js && node --check src/report-rules.js && node --check src/server.js",
+    "test": "npm run check && node --test"
   },
   "dependencies": {
     "exceljs": "^4.4.0",
