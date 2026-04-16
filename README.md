@@ -48,3 +48,18 @@ node src/cli.js --month 2025-12 --debug-unmatched --limit 20
 ```bash
 REPORT_RULES_PATH=/your/path/report-rules.json npm start
 ```
+
+## Docker 镜像发布
+
+仓库已包含 GitHub Actions 多架构构建配置：
+
+`/Users/xiaochen/Desktop/123/.github/workflows/docker-multiarch.yml`
+
+默认行为：
+
+- `push` 到 `main` 或 `master` 时构建并推送 `linux/amd64` 和 `linux/arm64`
+- 打版本标签 `v*` 时也会推送镜像
+- `pull_request` 只做构建校验，不推送镜像
+- 镜像默认发布到 `ghcr.io/<owner>/<repo>`
+
+如果仓库启用了 GitHub Packages，使用内置 `GITHUB_TOKEN` 就可以推送到 GHCR。
