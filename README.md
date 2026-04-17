@@ -43,6 +43,7 @@ REPORT_API_BASE_URL=http://127.0.0.1:3000 npm run mcp
 - API：`/api/reports/generate`、`/api/reports/debug/unmatched`、`/api/reports/download/:fileId`
 - 项目级 skill：仓库内 `.codex/skills/oracle-report-service-api/`
 - MCP：`npm run mcp`
+- GHCR 镜像：`ghcr.io/xiaoguan521/baobiao:baobiao-YYYYMMDDHHmm`，时间按东八区生成
 
 ## 常用命令
 
