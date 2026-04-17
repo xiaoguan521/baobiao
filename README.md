@@ -1,6 +1,6 @@
 # Oracle Excel Report Service
 
-按指定月份从 Oracle 查询基础数据，写入 Excel 模板中的基础值单元格，并保留模板原有公式。
+按指定月份从 Oracle 查询基础数据，写入 Excel 模板中的基础值单元格，并保留模板原有公式。现在同时提供集中部署 API、内置调用页面、项目级 skill 和 MCP 封装。
 
 ## 快速开始
 
@@ -23,12 +23,26 @@ node src/cli.js --month 2025-12
 npm start
 ```
 
+启动 MCP server（供 AI 工具接入）：
+
+```bash
+REPORT_API_BASE_URL=http://127.0.0.1:3000 npm run mcp
+```
+
 ## 文档导航
 
 - 配置使用手册：`docs/配置使用手册.md`
 - 部署手册：`docs/部署手册.md`
+- MCP 接入说明：`docs/MCP接入说明.md`
 - 规则配置文件：`config/report-rules.json`
 - 环境变量示例：`.env.example`
+
+## 访问入口
+
+- 页面入口：启动服务后访问 `http://127.0.0.1:3000/`
+- API：`/api/reports/generate`、`/api/reports/debug/unmatched`、`/api/reports/download/:fileId`
+- 项目级 skill：仓库内 `.codex/skills/oracle-report-service-api/`
+- MCP：`npm run mcp`
 
 ## 常用命令
 
@@ -54,6 +68,12 @@ REPORT_RULES_PATH=/your/path/report-rules.json npm start
 
 ```bash
 REPORT_API_TOKEN=replace-with-a-strong-token npm start
+```
+
+把项目级 skill 安装到本机 Codex：
+
+```bash
+npm run skill:install
 ```
 
 ## Docker 镜像发布

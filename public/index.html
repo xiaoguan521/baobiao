@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Oracle 报表服务台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Oracle Excel Report Service</p>
+          <h1>集中生成月报，不让客户端碰数据库。</h1>
+          <p class="subtitle">
+            业务人员通过页面发起生成，AI 通过同一套 API 调用，服务端统一连接 Oracle 并输出 Excel。
+          </p>
+        </div>
+        <div class="hero-status">
+          <div class="status-card">
+            <span class="status-label">服务状态</span>
+            <strong id="healthText">检测中...</strong>
+          </div>
+          <div class="status-card">
+            <span class="status-label">鉴权要求</span>
+            <strong id="authText">检测中...</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>访问配置</h2>
+          <p>如果服务启用了 `REPORT_API_TOKEN`，在这里填写后即可复用到页面内所有请求。</p>
+        </div>
+        <form id="authForm" class="grid-form">
+          <label>
+            <span>API Token</span>
+            <input id="apiToken" type="password" placeholder="可留空" autocomplete="off" />
+          </label>
+          <label class="full-width">
+            <span>Token 状态</span>
+            <div id="tokenHint" class="hint-box">未保存到服务器，仅保存在当前浏览器。</div>
+          </label>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>生成报表</h2>
+          <p>默认生成整本 Excel。若只导出单个 sheet，请勾选“仅导出该 sheet”。</p>
+        </div>
+        <form id="generateForm" class="grid-form">
+          <label>
+            <span>月份</span>
+            <input id="month" name="month" type="month" required />
+          </label>
+          <label>
+            <span>Sheet</span>
+            <select id="sheetName" name="sheetName">
+              <option value="">整本报表</option>
+            </select>
+          </label>
+          <label class="checkbox">
+            <input id="sheetOnly" name="sheetOnly" type="checkbox" />
+            <span>仅导出该 sheet</span>
+          </label>
+          <div class="actions full-width">
+            <button type="submit">生成报表</button>
+            <button type="button" id="resetResult" class="ghost">清空结果</button>
+          </div>
+        </form>
+
+        <div id="generateResult" class="result-card empty">
+          <p>生成结果会显示在这里。</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>未匹配网点排查</h2>
+          <p>用于补充 `outletRules`，快速查看哪些经办人、地区和事项仍未命中网点规则。</p>
+        </div>
+        <form id="debugForm" class="grid-form">
+          <label>
+            <span>月份</span>
+            <input id="debugMonth" name="month" type="month" required />
+          </label>
+          <label>
+            <span>返回条数</span>
+            <input id="debugLimit" name="limit" type="number" min="1" max="200" value="20" required />
+          </label>
+          <div class="actions full-width">
+            <button type="submit">查询未匹配</button>
+          </div>
+        </form>
+
+        <div id="debugResult" class="result-card empty">
+          <p>排查结果会显示在这里。</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js" defer></script>
+  </body>
+  </html>

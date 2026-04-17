@@ -7,12 +7,16 @@
   "scripts": {
     "start": "node src/server.js",
     "cli": "node src/cli.js",
-    "check": "node --check src/cli.js && node --check src/report-engine.js && node --check src/report-rules.js && node --check src/server.js",
+    "mcp": "node src/mcp-server.mjs",
+    "skill:install": "sh scripts/install-project-skill.sh",
+    "check": "node --check src/cli.js && node --check src/report-engine.js && node --check src/report-rules.js && node --check src/server.js && node --check src/mcp-server.mjs",
     "test": "npm run check && node --test"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "exceljs": "^4.4.0",
     "express": "^4.21.2",
-    "oracledb": "^6.8.0"
+    "oracledb": "^6.8.0",
+    "zod": "^3.25.76"
   }
 }
