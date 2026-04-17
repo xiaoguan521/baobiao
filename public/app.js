@@ -76,7 +76,10 @@ async function readJsonResponse(response, fallbackMessage) {
 }
 
 async function downloadWithAuth(file) {
-  const response = await fetch(file.downloadUrl, {
+  const downloadUrl = file.id
+    ? `/api/reports/download/${encodeURIComponent(file.id)}`
+    : file.downloadUrl;
+  const response = await fetch(downloadUrl, {
     headers: requestHeaders(false)
   });
 

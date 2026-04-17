@@ -10,6 +10,6 @@ services:
       ORACLE_PASSWORD: Damoxing123!
       ORACLE_DSN: host.docker.internal:51521/FREEPDB1
       REPORT_API_TOKEN: replace-with-a-strong-token
-      REPORT_PUBLIC_BASE_URL: https://report.example.com
+      REPORT_PUBLIC_BASE_URL: http://127.0.0.1:3000
     volumes:
       - ./data:/app/generated
