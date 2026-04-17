@@ -3,6 +3,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
+import sqlExplainerModule from "./report-sql-explainer.js";
+
+const { explainFieldSql } = sqlExplainerModule;
 
 const serviceBaseUrl = normalizeBaseUrl(process.env.REPORT_API_BASE_URL || "http://127.0.0.1:3000");
 const apiToken = String(process.env.REPORT_API_TOKEN || "").trim();
@@ -130,6 +133,25 @@ server.registerTool(
     });
     const payload = await callApi(`/api/reports/debug/unmatched?${params.toString()}`);
     return asTextResult(payload);
+  }
+);
+
+server.registerTool(
+  "explain_sheet_field_sql",
+  {
+    description: "Explain which SQL and post-processing logic are used for a field in a report sheet.",
+    inputSchema: {
+      sheetName: z.string().describe("Sheet name, for example 市本级, 排名, 占比"),
+      fieldName: z.string().describe("Field or column name, for example 归集, 比上月增减, 合计"),
+      rowName: z.string().optional().describe("Optional row label such as a branch name, bank name, item name, or reviewer row item")
+    }
+  },
+  async ({ sheetName, fieldName, rowName }) => {
+    const payload = explainFieldSql({ sheetName, fieldName, rowName });
+    return {
+      ...asTextResult(payload),
+      structuredContent: payload
+    };
   }
 );
 

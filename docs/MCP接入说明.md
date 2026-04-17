@@ -41,12 +41,13 @@ npm run mcp
 
 ## 3. MCP 工具列表
 
-当前 MCP server 暴露 4 个工具：
+当前 MCP server 暴露 5 个工具：
 
 - `health_check`
 - `list_report_sheets`
 - `generate_report`
 - `debug_unmatched_outlets`
+- `explain_sheet_field_sql`
 
 ## 4. 推荐调用方式
 
@@ -82,6 +83,33 @@ npm run mcp
   "limit": 20
 }
 ```
+
+### 4.4 查询某个 sheet 字段的取值 SQL
+
+参数示例：
+
+```json
+{
+  "sheetName": "市本级",
+  "fieldName": "比上月增减",
+  "rowName": "工行锦山支行"
+}
+```
+
+说明：
+
+- `sheetName` 填 sheet 名称
+- `fieldName` 填列名或字段名，例如 `归集`、`合计`、`比上月增减`
+- `rowName` 可选，但强烈建议提供
+- 对地区 sheet，`rowName` 一般是网点名称
+- 对“各渠道复核业务来源统计”和“复核业务量统计”，`rowName` 一般是 B 列事项名称
+
+返回内容会包含：
+
+- 实际明细来源 SQL
+- 用于校验的 SQL 模板
+- 这个字段是否还有代码层二次计算
+- 依赖哪些规则配置
 
 ## 5. 设计边界
 

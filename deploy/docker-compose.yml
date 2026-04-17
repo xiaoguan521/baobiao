@@ -1,0 +1,15 @@
+services:
+  baobiao:
+    image: ghcr.io/xiaoguan521/baobiao:latest
+    container_name: baobiao
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      ORACLE_USER: damoxing
+      ORACLE_PASSWORD: Damoxing123!
+      ORACLE_DSN: host.docker.internal:51521/FREEPDB1
+      REPORT_API_TOKEN: replace-with-a-strong-token
+      REPORT_PUBLIC_BASE_URL: https://report.example.com
+    volumes:
+      - ./data:/app/generated
