@@ -101,6 +101,45 @@ test("protected endpoints accept bearer token", async (t) => {
   assert.equal("outputPath" in payload, false);
 });
 
+test("generate endpoint accepts sheet names even when config contains leading spaces", async (t) => {
+  const downloadRoot = fs.mkdtempSync(path.join(os.tmpdir(), "report-generate-sheet-"));
+  const generatedFile = path.join(downloadRoot, "reviewer.xlsx");
+  fs.writeFileSync(generatedFile, "generated");
+  const app = createApp({
+    apiToken: "secret-token",
+    analyzeUnmatched: async () => ({ ok: true }),
+    generateReport: async (payload) => ({
+      month: payload.month,
+      sheetName: payload.sheetName,
+      sheetOnly: Boolean(payload.sheetOnly),
+      outputPath: generatedFile,
+      stats: { scannedRows: 10, classifiedRows: 9, unmatchedOutletRows: 1 }
+    }),
+    reportSheets: ["总表", " 复核业务量统计"],
+    configPath: "/tmp/report-rules.json",
+    downloadRoot
+  });
+  const server = await startTestServer(app);
+  t.after(async () => {
+    await stopTestServer(server);
+    fs.rmSync(downloadRoot, { recursive: true, force: true });
+  });
+
+  const { port } = server.address();
+  const response = await fetch(`http://127.0.0.1:${port}/api/reports/generate`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: "Bearer secret-token"
+    },
+    body: JSON.stringify({ month: "2025-12", sheetName: "复核业务量统计", sheetOnly: true })
+  });
+
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.sheetName, " 复核业务量统计");
+});
+
 test("download endpoint rejects files outside configured output root", async (t) => {
   const downloadRoot = fs.mkdtempSync(path.join(os.tmpdir(), "report-download-"));
   const insideFile = path.join(downloadRoot, "inside.txt");

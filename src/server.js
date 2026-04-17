@@ -64,6 +64,19 @@ function createRequestBaseUrl(req, publicBaseUrl) {
   return `${req.protocol}://${req.get("host")}`;
 }
 
+function normalizeSheetName(sheetName) {
+  return String(sheetName == null ? "" : sheetName).trim();
+}
+
+function resolveSheetName(sheetName, availableSheetNames) {
+  const exactName = String(sheetName == null ? "" : sheetName);
+  if (!exactName) return undefined;
+  const exactMatch = availableSheetNames.find((item) => item === exactName);
+  if (exactMatch) return exactMatch;
+  const normalizedName = normalizeSheetName(exactName);
+  return availableSheetNames.find((item) => normalizeSheetName(item) === normalizedName);
+}
+
 function columnNumberToLabel(columnNumber) {
   let current = Number(columnNumber || 0);
   let label = "";
@@ -289,24 +302,25 @@ function createFileDescriptor(filePath, downloadRoot, req, publicBaseUrl) {
 function parseGenerateRequest(body, reportSheets) {
   const payload = body || {};
   const month = String(payload.month || "").trim();
-  const sheetName = payload.sheetName == null ? "" : String(payload.sheetName).trim();
+  const requestedSheetName = payload.sheetName == null ? "" : String(payload.sheetName);
   const sheetOnly = Boolean(payload.sheetOnly);
+  const resolvedSheetName = resolveSheetName(requestedSheetName, reportSheets);
 
   if (!month) {
     throw new Error("month is required");
   }
 
-  if (sheetOnly && !sheetName) {
+  if (sheetOnly && !normalizeSheetName(requestedSheetName)) {
     throw new Error("sheetOnly requires sheetName");
   }
 
-  if (sheetName && !reportSheets.includes(sheetName)) {
-    throw new Error(`sheetName must be one of: ${reportSheets.join(", ")}`);
+  if (normalizeSheetName(requestedSheetName) && !resolvedSheetName) {
+    throw new Error(`sheetName must be one of: ${reportSheets.map((item) => normalizeSheetName(item)).join(", ")}`);
   }
 
   return {
     month,
-    sheetName: sheetName || undefined,
+    sheetName: resolvedSheetName,
     sheetOnly
   };
 }
@@ -428,11 +442,13 @@ function createApp(options = {}) {
 
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.readFile(resolvedPath);
-      const requestedSheetName = req.query.sheet == null ? "" : String(req.query.sheet).trim();
-      const worksheet = requestedSheetName ? workbook.getWorksheet(requestedSheetName) : workbook.worksheets[0];
+      const availableSheetNames = workbook.worksheets.map((item) => item.name);
+      const requestedSheetName = req.query.sheet == null ? "" : String(req.query.sheet);
+      const resolvedSheetName = requestedSheetName ? resolveSheetName(requestedSheetName, availableSheetNames) : undefined;
+      const worksheet = resolvedSheetName ? workbook.getWorksheet(resolvedSheetName) : workbook.worksheets[0];
 
       if (!worksheet) {
-        res.status(400).json({ error: requestedSheetName ? `sheet not found: ${requestedSheetName}` : "workbook has no worksheets" });
+        res.status(400).json({ error: requestedSheetName ? `sheet not found: ${normalizeSheetName(requestedSheetName)}` : "workbook has no worksheets" });
         return;
       }
 
