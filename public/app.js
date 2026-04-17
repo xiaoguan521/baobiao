@@ -31,8 +31,10 @@ function requestHeaders(needsJson = false) {
 }
 
 function renderHealth(payload) {
-  document.querySelector("#healthText").textContent = payload.ok ? "在线" : "异常";
-  document.querySelector("#authText").textContent = payload.authRequired ? "需要 Token" : "无需 Token";
+  const healthText = document.querySelector("#healthText");
+  const authText = document.querySelector("#authText");
+  if (healthText) healthText.textContent = payload.ok ? "在线" : "异常";
+  if (authText) authText.textContent = payload.authRequired ? "需要 Token" : "无需 Token";
   state.authRequired = Boolean(payload.authRequired);
   setTokenHint(
     state.authRequired ? "当前服务要求 Token，请填写后再发起生成或排查。" : "当前服务未要求 Token。",
