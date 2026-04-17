@@ -42,7 +42,7 @@ REPORT_API_BASE_URL=http://127.0.0.1:3000 npm run mcp
 - 页面入口：启动服务后访问 `http://127.0.0.1:3000/`
 - API：`/api/reports/generate`、`/api/reports/debug/unmatched`、`/api/reports/download/:fileId`
 - 项目级 skill：仓库内 `.codex/skills/oracle-report-service-api/`
-- MCP：`npm run mcp`
+- MCP：`npm run mcp`，当前为本地 `stdio` MCP，连接已部署 HTTP 服务
 - GHCR 镜像：`ghcr.io/xiaoguan521/baobiao:baobiao-YYYYMMDDHHmm`，时间按东八区生成
 
 ## 常用命令
