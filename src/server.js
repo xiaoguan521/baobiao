@@ -1,4 +1,5 @@
 const express = require("express");
+const ExcelJS = require("exceljs");
 const fs = require("fs");
 const path = require("path");
 const {
@@ -63,6 +64,116 @@ function createRequestBaseUrl(req, publicBaseUrl) {
   return `${req.protocol}://${req.get("host")}`;
 }
 
+function columnNumberToLabel(columnNumber) {
+  let current = Number(columnNumber || 0);
+  let label = "";
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    current = Math.floor((current - 1) / 26);
+  }
+  return label || "A";
+}
+
+function getCellDisplayValue(cell) {
+  if (!cell || cell.value == null) return "";
+  const value = cell.value;
+
+  if (value instanceof Date) {
+    return cell.text || value.toISOString();
+  }
+
+  if (typeof value === "object") {
+    if (Array.isArray(value.richText)) {
+      return value.richText.map((item) => item.text || "").join("");
+    }
+    if (value.formula || value.sharedFormula) {
+      if (value.result != null) return String(value.result);
+      return value.formula ? `=${value.formula}` : "";
+    }
+    if (value.hyperlink) return String(value.text || value.hyperlink);
+    if (value.text != null) return String(value.text);
+    if (value.error) return String(value.error);
+  }
+
+  if (cell.text) return cell.text;
+  return String(value);
+}
+
+function findWorksheetBounds(worksheet) {
+  let minRow = Number.POSITIVE_INFINITY;
+  let maxRow = 0;
+  let minColumn = Number.POSITIVE_INFINITY;
+  let maxColumn = 0;
+
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    row.eachCell({ includeEmpty: false }, (cell, columnNumber) => {
+      const displayValue = getCellDisplayValue(cell);
+      if (!String(displayValue).trim()) return;
+      minRow = Math.min(minRow, rowNumber);
+      maxRow = Math.max(maxRow, rowNumber);
+      minColumn = Math.min(minColumn, columnNumber);
+      maxColumn = Math.max(maxColumn, columnNumber);
+    });
+  });
+
+  if (!Number.isFinite(minRow) || !Number.isFinite(minColumn)) {
+    return null;
+  }
+
+  return { minRow, maxRow, minColumn, maxColumn };
+}
+
+function extractWorksheetPreview(worksheet, options = {}) {
+  const bounds = findWorksheetBounds(worksheet);
+  if (!bounds) {
+    return {
+      columns: [],
+      rows: [],
+      range: null,
+      truncatedRows: false,
+      truncatedColumns: false
+    };
+  }
+
+  const maxRows = Number(options.maxRows || 40);
+  const maxColumns = Number(options.maxColumns || 12);
+  const endRow = Math.min(bounds.maxRow, bounds.minRow + maxRows - 1);
+  const endColumn = Math.min(bounds.maxColumn, bounds.minColumn + maxColumns - 1);
+  const columns = [];
+  const rows = [];
+
+  for (let columnNumber = bounds.minColumn; columnNumber <= endColumn; columnNumber += 1) {
+    columns.push({
+      index: columnNumber,
+      label: columnNumberToLabel(columnNumber)
+    });
+  }
+
+  for (let rowNumber = bounds.minRow; rowNumber <= endRow; rowNumber += 1) {
+    const worksheetRow = worksheet.getRow(rowNumber);
+    rows.push({
+      rowNumber,
+      cells: columns.map((column) => getCellDisplayValue(worksheetRow.getCell(column.index)))
+    });
+  }
+
+  return {
+    columns,
+    rows,
+    range: {
+      startRow: bounds.minRow,
+      endRow,
+      startColumn: bounds.minColumn,
+      endColumn
+    },
+    totalRows: bounds.maxRow - bounds.minRow + 1,
+    totalColumns: bounds.maxColumn - bounds.minColumn + 1,
+    truncatedRows: endRow < bounds.maxRow,
+    truncatedColumns: endColumn < bounds.maxColumn
+  };
+}
+
 function createFileDescriptor(filePath, downloadRoot, req, publicBaseUrl) {
   const resolvedPath = normalizePathForCompare(filePath);
   if (!isPathInsideRoot(resolvedPath, downloadRoot)) {
@@ -123,6 +234,22 @@ function parseDebugRequest(query) {
     month,
     limit: rawLimit
   };
+}
+
+function resolveFileIdToPath(fileId, downloadRoot) {
+  let relativePath;
+  try {
+    relativePath = decodeFileId(fileId);
+  } catch (_error) {
+    throw new Error("invalid fileId");
+  }
+
+  const resolvedPath = normalizePathForCompare(path.join(downloadRoot, relativePath));
+  if (!isPathInsideRoot(resolvedPath, downloadRoot)) {
+    throw new Error("file is outside download root");
+  }
+
+  return resolvedPath;
 }
 
 function createApp(options = {}) {
@@ -198,32 +325,57 @@ function createApp(options = {}) {
     }
   });
 
+  app.get("/api/reports/preview/:fileId", requireAuth, async (req, res) => {
+    try {
+      const resolvedPath = resolveFileIdToPath(req.params.fileId, downloadRoot);
+      if (!fs.existsSync(resolvedPath)) {
+        res.status(404).json({ error: "file not found" });
+        return;
+      }
+
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(resolvedPath);
+      const requestedSheetName = req.query.sheet == null ? "" : String(req.query.sheet).trim();
+      const worksheet = requestedSheetName ? workbook.getWorksheet(requestedSheetName) : workbook.worksheets[0];
+
+      if (!worksheet) {
+        res.status(400).json({ error: requestedSheetName ? `sheet not found: ${requestedSheetName}` : "workbook has no worksheets" });
+        return;
+      }
+
+      res.json({
+        file: {
+          id: req.params.fileId,
+          name: path.basename(resolvedPath)
+        },
+        sheets: workbook.worksheets.map((item) => item.name),
+        sheetName: worksheet.name,
+        preview: extractWorksheetPreview(worksheet)
+      });
+    } catch (error) {
+      const statusCode = error.message === "invalid fileId" || error.message === "file is outside download root" ? 400 : 500;
+      res.status(statusCode).json({ error: error.message });
+    }
+  });
+
   app.get("/api/reports/download/:fileId", requireAuth, async (req, res) => {
     if (!req.params.fileId) {
       res.status(400).json({ error: "fileId is required" });
       return;
     }
 
-    let relativePath;
     try {
-      relativePath = decodeFileId(req.params.fileId);
-    } catch (_error) {
-      res.status(400).json({ error: "invalid fileId" });
+      const resolvedPath = resolveFileIdToPath(req.params.fileId, downloadRoot);
+      if (!fs.existsSync(resolvedPath)) {
+        res.status(404).json({ error: "file not found" });
+        return;
+      }
+
+      res.download(resolvedPath);
+    } catch (error) {
+      res.status(400).json({ error: error.message });
       return;
     }
-
-    const resolvedPath = normalizePathForCompare(path.join(downloadRoot, relativePath));
-    if (!isPathInsideRoot(resolvedPath, downloadRoot)) {
-      res.status(400).json({ error: "file is outside download root" });
-      return;
-    }
-
-    if (!fs.existsSync(resolvedPath)) {
-      res.status(404).json({ error: "file not found" });
-      return;
-    }
-
-    res.download(resolvedPath);
   });
 
   app.use(express.static(publicDir, { index: "index.html" }));
@@ -254,6 +406,7 @@ module.exports = {
   parseDebugRequest,
   parseGenerateRequest,
   resolveDownloadRoot,
+  resolveFileIdToPath,
   resolvePublicBaseUrl,
   startServer
 };

@@ -3,6 +3,7 @@ const os = require("os");
 const path = require("path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const ExcelJS = require("exceljs");
 const { createApp, encodeFileId } = require("../src/server");
 
 async function startTestServer(app) {
@@ -134,6 +135,47 @@ test("download endpoint rejects files outside configured output root", async (t)
   );
   assert.equal(insideResponse.status, 200);
   assert.equal(await insideResponse.text(), "inside");
+});
+
+test("preview endpoint returns worksheet data for generated workbook", async (t) => {
+  const downloadRoot = fs.mkdtempSync(path.join(os.tmpdir(), "report-preview-"));
+  const generatedFile = path.join(downloadRoot, "report.xlsx");
+  const workbook = new ExcelJS.Workbook();
+  const regionSheet = workbook.addWorksheet("市本级");
+  regionSheet.getCell("B2").value = "网点";
+  regionSheet.getCell("C2").value = "归集";
+  regionSheet.getCell("B3").value = "工行锦山支行";
+  regionSheet.getCell("C3").value = 12;
+  workbook.addWorksheet("排名").getCell("A1").value = "排名";
+  await workbook.xlsx.writeFile(generatedFile);
+
+  const app = createApp({
+    apiToken: "secret-token",
+    analyzeUnmatched: async () => ({}),
+    generateReport: async () => ({}),
+    reportSheets: ["市本级", "排名"],
+    configPath: "/tmp/report-rules.json",
+    downloadRoot
+  });
+  const server = await startTestServer(app);
+  t.after(async () => {
+    await stopTestServer(server);
+    fs.rmSync(downloadRoot, { recursive: true, force: true });
+  });
+
+  const { port } = server.address();
+  const response = await fetch(
+    `http://127.0.0.1:${port}/api/reports/preview/${encodeURIComponent(encodeFileId("report.xlsx"))}?sheet=${encodeURIComponent("市本级")}`,
+    { headers: { authorization: "Bearer secret-token" } }
+  );
+
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.deepEqual(payload.sheets, ["市本级", "排名"]);
+  assert.equal(payload.sheetName, "市本级");
+  assert.deepEqual(payload.preview.columns.map((item) => item.label), ["B", "C"]);
+  assert.equal(payload.preview.rows[0].rowNumber, 2);
+  assert.deepEqual(payload.preview.rows[1].cells, ["工行锦山支行", "12"]);
 });
 
 test("root page is served as static html", async (t) => {

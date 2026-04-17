@@ -52,18 +52,27 @@ function renderSheets(payload) {
   });
 }
 
-function formatJsonBlock(payload) {
-  const pre = document.createElement("pre");
-  pre.textContent = JSON.stringify(payload, null, 2);
-  return pre;
-}
-
 function renderMessage(container, message, tone = "neutral") {
   container.className = `result-card ${tone}`;
   container.innerHTML = "";
   const paragraph = document.createElement("p");
   paragraph.textContent = message;
   container.appendChild(paragraph);
+}
+
+async function readJsonResponse(response, fallbackMessage) {
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (_error) {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(payload?.error || fallbackMessage);
+  }
+
+  return payload;
 }
 
 async function downloadWithAuth(file) {
@@ -93,7 +102,137 @@ async function downloadWithAuth(file) {
   window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
 }
 
-function renderGenerateResult(payload) {
+async function fetchSheetPreview(fileId, sheetName) {
+  const params = new URLSearchParams();
+  if (sheetName) params.set("sheet", sheetName);
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`/api/reports/preview/${encodeURIComponent(fileId)}${suffix}`, {
+    headers: requestHeaders(false)
+  });
+  return readJsonResponse(response, "预览加载失败");
+}
+
+function renderPreviewTable(previewPayload) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "preview-panel";
+
+  const note = document.createElement("div");
+  note.className = "preview-meta";
+  const preview = previewPayload.preview || {};
+  const notes = [
+    `预览 Sheet：${previewPayload.sheetName}`,
+    preview.totalRows ? `展示 ${preview.rows.length}/${preview.totalRows} 行` : "暂无有效数据"
+  ];
+  if (preview.totalColumns) notes.push(`展示 ${preview.columns.length}/${preview.totalColumns} 列`);
+  if (preview.truncatedRows || preview.truncatedColumns) notes.push("当前为裁剪预览，下载文件可查看完整内容");
+  note.textContent = notes.join(" · ");
+  wrapper.appendChild(note);
+
+  if (!preview.rows?.length || !preview.columns?.length) {
+    const empty = document.createElement("div");
+    empty.className = "preview-empty";
+    empty.textContent = "当前 Sheet 暂无可展示的数据。";
+    wrapper.appendChild(empty);
+    return wrapper;
+  }
+
+  const scroll = document.createElement("div");
+  scroll.className = "preview-scroll";
+  const table = document.createElement("table");
+  table.className = "preview-table";
+
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  const rowHead = document.createElement("th");
+  rowHead.textContent = "行";
+  headRow.appendChild(rowHead);
+  preview.columns.forEach((column) => {
+    const th = document.createElement("th");
+    th.textContent = column.label;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  preview.rows.forEach((row) => {
+    const tr = document.createElement("tr");
+    const th = document.createElement("th");
+    th.scope = "row";
+    th.textContent = row.rowNumber;
+    tr.appendChild(th);
+    row.cells.forEach((cell) => {
+      const td = document.createElement("td");
+      td.textContent = cell == null ? "" : String(cell);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  scroll.appendChild(table);
+  wrapper.appendChild(scroll);
+  return wrapper;
+}
+
+async function attachPreview(container, payload) {
+  const section = document.createElement("section");
+  section.className = "preview-shell";
+  section.innerHTML = `
+    <div class="preview-head">
+      <div>
+        <h3>Sheet 预览</h3>
+        <p>页面展示的是已生成 Excel 的裁剪预览，方便快速核对结果。</p>
+      </div>
+    </div>
+  `;
+
+  const toolbar = document.createElement("div");
+  toolbar.className = "preview-toolbar";
+  const selectLabel = document.createElement("label");
+  selectLabel.className = "preview-select";
+  selectLabel.innerHTML = "<span>选择 Sheet</span>";
+  const select = document.createElement("select");
+  select.disabled = true;
+  selectLabel.appendChild(select);
+  toolbar.appendChild(selectLabel);
+  section.appendChild(toolbar);
+
+  const content = document.createElement("div");
+  content.className = "preview-content";
+  content.innerHTML = '<div class="preview-empty">正在加载 sheet 预览...</div>';
+  section.appendChild(content);
+  container.appendChild(section);
+
+  const loadPreview = async (sheetName) => {
+    content.innerHTML = '<div class="preview-empty">正在加载 sheet 预览...</div>';
+    try {
+      const previewPayload = await fetchSheetPreview(payload.file.id, sheetName);
+      const sheetOptions = previewPayload.sheets || [];
+      select.innerHTML = "";
+      sheetOptions.forEach((sheet) => {
+        const option = document.createElement("option");
+        option.value = sheet;
+        option.textContent = sheet;
+        option.selected = sheet === previewPayload.sheetName;
+        select.appendChild(option);
+      });
+      select.disabled = sheetOptions.length <= 1;
+      content.innerHTML = "";
+      content.appendChild(renderPreviewTable(previewPayload));
+    } catch (error) {
+      content.innerHTML = "";
+      const fail = document.createElement("div");
+      fail.className = "preview-empty";
+      fail.textContent = error.message;
+      content.appendChild(fail);
+    }
+  };
+
+  select.addEventListener("change", () => loadPreview(select.value));
+  await loadPreview(payload.sheetName || "");
+}
+
+async function renderGenerateResult(payload) {
   const container = document.querySelector("#generateResult");
   container.className = "result-card success";
   container.innerHTML = "";
@@ -143,7 +282,7 @@ function renderGenerateResult(payload) {
     meta.appendChild(item);
   });
   container.appendChild(meta);
-  container.appendChild(formatJsonBlock(payload));
+  await attachPreview(container, payload);
 }
 
 function renderTopList(title, items) {
@@ -226,9 +365,8 @@ async function submitGenerate(event) {
         sheetOnly
       })
     });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "生成失败");
-    renderGenerateResult(payload);
+    const payload = await readJsonResponse(response, "生成失败");
+    await renderGenerateResult(payload);
   } catch (error) {
     renderMessage(result, error.message, "error");
   }
@@ -250,8 +388,7 @@ async function submitDebug(event) {
     const response = await fetch(`/api/reports/debug/unmatched?${params.toString()}`, {
       headers: requestHeaders(false)
     });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "查询失败");
+    const payload = await readJsonResponse(response, "查询失败");
     renderDebugResult(payload);
   } catch (error) {
     renderMessage(result, error.message, "error");
