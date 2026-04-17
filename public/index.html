@@ -55,30 +55,6 @@
           <p>生成结果会显示在这里。</p>
         </div>
       </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <h2>未匹配网点排查</h2>
-          <p>用于补充 `outletRules`，快速查看哪些经办人、地区和事项仍未命中网点规则。</p>
-        </div>
-        <form id="debugForm" class="grid-form">
-          <label>
-            <span>月份</span>
-            <input id="debugMonth" name="month" type="month" required />
-          </label>
-          <label>
-            <span>返回条数</span>
-            <input id="debugLimit" name="limit" type="number" min="1" max="200" value="20" required />
-          </label>
-          <div class="actions full-width">
-            <button type="submit">查询未匹配</button>
-          </div>
-        </form>
-
-        <div id="debugResult" class="result-card empty">
-          <p>排查结果会显示在这里。</p>
-        </div>
-      </section>
     </main>
 
     <script src="/app.js" defer></script>

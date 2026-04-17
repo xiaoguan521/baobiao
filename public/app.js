@@ -411,9 +411,13 @@ function wireEvents() {
     setTokenHint(tokenInput.value.trim() ? "Token 已保存在当前浏览器。" : "未保存到服务器，仅保存在当前浏览器。");
   });
 
-  document.querySelector("#generateForm").addEventListener("submit", submitGenerate);
-  document.querySelector("#debugForm").addEventListener("submit", submitDebug);
-  document.querySelector("#resetResult").addEventListener("click", () => {
+  const generateForm = document.querySelector("#generateForm");
+  const debugForm = document.querySelector("#debugForm");
+  const resetResult = document.querySelector("#resetResult");
+
+  if (generateForm) generateForm.addEventListener("submit", submitGenerate);
+  if (debugForm) debugForm.addEventListener("submit", submitDebug);
+  if (resetResult) resetResult.addEventListener("click", () => {
     renderMessage(document.querySelector("#generateResult"), "生成结果会显示在这里。");
   });
 }
@@ -422,7 +426,8 @@ async function main() {
   const today = new Date();
   const defaultMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   document.querySelector("#month").value = defaultMonth;
-  document.querySelector("#debugMonth").value = defaultMonth;
+  const debugMonth = document.querySelector("#debugMonth");
+  if (debugMonth) debugMonth.value = defaultMonth;
 
   wireEvents();
 
@@ -430,7 +435,10 @@ async function main() {
     await loadBootstrap();
   } catch (error) {
     renderMessage(document.querySelector("#generateResult"), `初始化失败：${error.message}`, "error");
-    renderMessage(document.querySelector("#debugResult"), `初始化失败：${error.message}`, "error");
+    const debugResult = document.querySelector("#debugResult");
+    if (debugResult) {
+      renderMessage(debugResult, `初始化失败：${error.message}`, "error");
+    }
   }
 }
 
