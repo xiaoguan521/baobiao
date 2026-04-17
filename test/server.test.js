@@ -175,7 +175,49 @@ test("preview endpoint returns worksheet data for generated workbook", async (t)
   assert.equal(payload.sheetName, "市本级");
   assert.deepEqual(payload.preview.columns.map((item) => item.label), ["B", "C"]);
   assert.equal(payload.preview.rows[0].rowNumber, 2);
-  assert.deepEqual(payload.preview.rows[1].cells, ["工行锦山支行", "12"]);
+  assert.deepEqual(
+    payload.preview.rows[1].cells.map((item) => item.value),
+    ["工行锦山支行", "12"]
+  );
+});
+
+test("preview endpoint keeps merged cells for frontend rendering", async (t) => {
+  const downloadRoot = fs.mkdtempSync(path.join(os.tmpdir(), "report-preview-merge-"));
+  const generatedFile = path.join(downloadRoot, "merge.xlsx");
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("总表");
+  worksheet.getCell("B2").value = "丹东公积金报表";
+  worksheet.mergeCells("B2:D2");
+  worksheet.getCell("B3").value = "地区";
+  worksheet.getCell("C3").value = "归集";
+  await workbook.xlsx.writeFile(generatedFile);
+
+  const app = createApp({
+    apiToken: "secret-token",
+    analyzeUnmatched: async () => ({}),
+    generateReport: async () => ({}),
+    reportSheets: ["总表"],
+    configPath: "/tmp/report-rules.json",
+    downloadRoot
+  });
+  const server = await startTestServer(app);
+  t.after(async () => {
+    await stopTestServer(server);
+    fs.rmSync(downloadRoot, { recursive: true, force: true });
+  });
+
+  const { port } = server.address();
+  const response = await fetch(
+    `http://127.0.0.1:${port}/api/reports/preview/${encodeURIComponent(encodeFileId("merge.xlsx"))}`,
+    { headers: { authorization: "Bearer secret-token" } }
+  );
+
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.preview.rows[0].cells[0].value, "丹东公积金报表");
+  assert.equal(payload.preview.rows[0].cells[0].colSpan, 3);
+  assert.equal(payload.preview.rows[0].cells[0].rowSpan, 1);
+  assert.equal(payload.preview.rows[1].cells[0].value, "地区");
 });
 
 test("root page is served as static html", async (t) => {

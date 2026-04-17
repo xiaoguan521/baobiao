@@ -424,6 +424,11 @@ button:hover,
   background: rgba(251, 247, 238, 0.54);
 }
 
+.preview-table td.is-merged {
+  background: linear-gradient(180deg, rgba(245, 239, 227, 0.96), rgba(255, 255, 255, 0.96));
+  font-weight: 700;
+}
+
 .debug-section {
   margin-top: 18px;
 }

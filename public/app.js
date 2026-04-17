@@ -166,7 +166,10 @@ function renderPreviewTable(previewPayload) {
     tr.appendChild(th);
     row.cells.forEach((cell) => {
       const td = document.createElement("td");
-      td.textContent = cell == null ? "" : String(cell);
+      td.textContent = cell?.value == null ? "" : String(cell.value);
+      if ((cell?.rowSpan || 1) > 1) td.rowSpan = cell.rowSpan;
+      if ((cell?.colSpan || 1) > 1) td.colSpan = cell.colSpan;
+      if (cell?.merged) td.classList.add("is-merged");
       tr.appendChild(td);
     });
     tbody.appendChild(tr);

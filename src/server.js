@@ -75,6 +75,35 @@ function columnNumberToLabel(columnNumber) {
   return label || "A";
 }
 
+function columnLabelToNumber(columnLabel) {
+  return String(columnLabel || "")
+    .toUpperCase()
+    .split("")
+    .reduce((total, char) => total * 26 + (char.charCodeAt(0) - 64), 0);
+}
+
+function parseCellReference(cellReference) {
+  const match = /^([A-Z]+)(\d+)$/i.exec(String(cellReference || "").trim());
+  if (!match) return null;
+  return {
+    column: columnLabelToNumber(match[1]),
+    row: Number(match[2])
+  };
+}
+
+function parseMergeRange(rangeReference) {
+  const [startRef, endRef] = String(rangeReference || "").split(":");
+  const start = parseCellReference(startRef);
+  const end = parseCellReference(endRef || startRef);
+  if (!start || !end) return null;
+  return {
+    startRow: Math.min(start.row, end.row),
+    endRow: Math.max(start.row, end.row),
+    startColumn: Math.min(start.column, end.column),
+    endColumn: Math.max(start.column, end.column)
+  };
+}
+
 function getCellDisplayValue(cell) {
   if (!cell || cell.value == null) return "";
   const value = cell.value;
@@ -100,6 +129,13 @@ function getCellDisplayValue(cell) {
   return String(value);
 }
 
+function getWorksheetMergeRegions(worksheet) {
+  const mergeRanges = worksheet.model?.merges || [];
+  return mergeRanges
+    .map((range) => parseMergeRange(range))
+    .filter(Boolean);
+}
+
 function findWorksheetBounds(worksheet) {
   let minRow = Number.POSITIVE_INFINITY;
   let maxRow = 0;
@@ -120,6 +156,15 @@ function findWorksheetBounds(worksheet) {
   if (!Number.isFinite(minRow) || !Number.isFinite(minColumn)) {
     return null;
   }
+
+  getWorksheetMergeRegions(worksheet).forEach((region) => {
+    const masterValue = getCellDisplayValue(worksheet.getCell(region.startRow, region.startColumn));
+    if (!String(masterValue).trim()) return;
+    minRow = Math.min(minRow, region.startRow);
+    maxRow = Math.max(maxRow, region.endRow);
+    minColumn = Math.min(minColumn, region.startColumn);
+    maxColumn = Math.max(maxColumn, region.endColumn);
+  });
 
   return { minRow, maxRow, minColumn, maxColumn };
 }
@@ -142,6 +187,14 @@ function extractWorksheetPreview(worksheet, options = {}) {
   const endColumn = Math.min(bounds.maxColumn, bounds.minColumn + maxColumns - 1);
   const columns = [];
   const rows = [];
+  const mergeRegions = getWorksheetMergeRegions(worksheet)
+    .filter((region) => (
+      region.endRow >= bounds.minRow
+      && region.startRow <= endRow
+      && region.endColumn >= bounds.minColumn
+      && region.startColumn <= endColumn
+    ));
+  const mergedCellsByKey = new Map();
 
   for (let columnNumber = bounds.minColumn; columnNumber <= endColumn; columnNumber += 1) {
     columns.push({
@@ -150,11 +203,45 @@ function extractWorksheetPreview(worksheet, options = {}) {
     });
   }
 
+  mergeRegions.forEach((region) => {
+    for (let rowNumber = region.startRow; rowNumber <= Math.min(region.endRow, endRow); rowNumber += 1) {
+      for (let columnNumber = region.startColumn; columnNumber <= Math.min(region.endColumn, endColumn); columnNumber += 1) {
+        mergedCellsByKey.set(`${rowNumber}:${columnNumber}`, region);
+      }
+    }
+  });
+
   for (let rowNumber = bounds.minRow; rowNumber <= endRow; rowNumber += 1) {
     const worksheetRow = worksheet.getRow(rowNumber);
+    const cells = [];
+
+    for (let columnNumber = bounds.minColumn; columnNumber <= endColumn; columnNumber += 1) {
+      const mergeRegion = mergedCellsByKey.get(`${rowNumber}:${columnNumber}`);
+      if (mergeRegion) {
+        const isMasterCell = mergeRegion.startRow === rowNumber && mergeRegion.startColumn === columnNumber;
+        if (!isMasterCell) continue;
+        cells.push({
+          column: columnNumber,
+          value: getCellDisplayValue(worksheetRow.getCell(columnNumber)),
+          rowSpan: Math.min(mergeRegion.endRow, endRow) - mergeRegion.startRow + 1,
+          colSpan: Math.min(mergeRegion.endColumn, endColumn) - mergeRegion.startColumn + 1,
+          merged: true
+        });
+        continue;
+      }
+
+      cells.push({
+        column: columnNumber,
+        value: getCellDisplayValue(worksheetRow.getCell(columnNumber)),
+        rowSpan: 1,
+        colSpan: 1,
+        merged: false
+      });
+    }
+
     rows.push({
       rowNumber,
-      cells: columns.map((column) => getCellDisplayValue(worksheetRow.getCell(column.index)))
+      cells
     });
   }
 
@@ -169,6 +256,12 @@ function extractWorksheetPreview(worksheet, options = {}) {
     },
     totalRows: bounds.maxRow - bounds.minRow + 1,
     totalColumns: bounds.maxColumn - bounds.minColumn + 1,
+    mergeRegions: mergeRegions.map((region) => ({
+      startRow: region.startRow,
+      endRow: Math.min(region.endRow, endRow),
+      startColumn: region.startColumn,
+      endColumn: Math.min(region.endColumn, endColumn)
+    })),
     truncatedRows: endRow < bounds.maxRow,
     truncatedColumns: endColumn < bounds.maxColumn
   };
