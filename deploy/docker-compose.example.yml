@@ -11,5 +11,7 @@ services:
       ORACLE_DSN: host.docker.internal:51521/FREEPDB1
       REPORT_API_TOKEN: replace-with-a-strong-token
       REPORT_PUBLIC_BASE_URL: https://report.example.com
+      REPORT_RULES_PATH: /app/config/report-rules.json
     volumes:
       - ./data:/app/generated
+      - ../config/report-rules.json:/app/config/report-rules.json:ro
