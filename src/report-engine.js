@@ -75,6 +75,15 @@ function createStats() {
   };
 }
 
+function textFromCellValue(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && Array.isArray(value.richText)) {
+    return value.richText.map((item) => item.text || "").join("");
+  }
+  return String(value);
+}
+
 function createTopCollector(limit) {
   return {
     limit,
@@ -390,11 +399,40 @@ function buildRowMap(worksheet, column) {
   return result;
 }
 
+function buildRegionRowMap(worksheet) {
+  const result = new Map();
+  for (let row = 1; row <= worksheet.rowCount; row += 1) {
+    const regionType = textFromCellValue(worksheet.getCell(`A${row}`).value).trim();
+    const outletName = textFromCellValue(worksheet.getCell(`B${row}`).value).trim();
+    if (!outletName) continue;
+    if (regionType === "中心" || regionType === "银行网点" || regionType === "合计" || outletName === "小计") {
+      result.set(outletName, row);
+    }
+  }
+  return result;
+}
+
 function updateHeaderText(text, replacement) {
   return String(text).replace(/\d{4}年\d{1,2}月(?:-\d{1,2}月)?/g, replacement);
 }
 
-function fillTotalSheet(worksheet, data, bounds) {
+function formatReportDate(date = new Date()) {
+  return `填报日期：${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function updateReportDateCells(worksheet, date = new Date()) {
+  const nextText = formatReportDate(date);
+  for (let row = 1; row <= worksheet.rowCount; row += 1) {
+    for (let col = 1; col <= worksheet.columnCount; col += 1) {
+      const cell = worksheet.getCell(row, col);
+      const currentText = textFromCellValue(cell.value);
+      if (!currentText.includes("填报时间：") && !currentText.includes("填报日期：")) continue;
+      cell.value = currentText.replace(/填报(?:时间|日期)：\d{4}年\d{1,2}月\d{1,2}日/g, nextText);
+    }
+  }
+}
+
+function fillTotalSheet(worksheet, data, bounds, generatedAt = new Date()) {
   worksheet.getCell("A3").value = updateHeaderText(worksheet.getCell("A3").value, `${bounds.year}年1月-12月`);
   const rowMap = {
     "工商银行": 6,
@@ -411,30 +449,36 @@ function fillTotalSheet(worksheet, data, bounds) {
   for (let monthNumber = 1; monthNumber <= 12; monthNumber += 1) {
     const monthKey = `${bounds.year}-${String(monthNumber).padStart(2, "0")}`;
     const col = 2 + monthNumber;
+    const shouldFillMonth = monthNumber <= bounds.month;
     const bankBucket = data.monthlyBankTotals.get(monthKey) || new Map();
     for (const bank of BANK_ORDER) {
-      setCellBaseValueByRowCol(worksheet, rowMap[bank], col, bankBucket.get(bank) || 0);
+      setCellBaseValueByRowCol(worksheet, rowMap[bank], col, shouldFillMonth ? bankBucket.get(bank) || 0 : null);
     }
-    setCellBaseValueByRowCol(worksheet, rowMap["中心办件"], col, data.monthlyCenterTotals.get(monthKey) || 0);
+    setCellBaseValueByRowCol(worksheet, rowMap["中心办件"], col, shouldFillMonth ? data.monthlyCenterTotals.get(monthKey) || 0 : null);
   }
 
   for (const bank of BANK_ORDER) {
-    const total = Array.from(data.monthlyBankTotals.values()).reduce((sum, monthMap) => sum + (monthMap.get(bank) || 0), 0);
+    const total = Array.from(data.monthlyBankTotals.entries())
+      .filter(([monthKey]) => Number(monthKey.slice(5, 7)) <= bounds.month)
+      .reduce((sum, [, monthMap]) => sum + (monthMap.get(bank) || 0), 0);
     setCellBaseValueByRowCol(worksheet, rowMap[bank], 15, total);
   }
-  const centerTotal = Array.from(data.monthlyCenterTotals.values()).reduce((sum, value) => sum + value, 0);
+  const centerTotal = Array.from(data.monthlyCenterTotals.entries())
+    .filter(([monthKey]) => Number(monthKey.slice(5, 7)) <= bounds.month)
+    .reduce((sum, [, value]) => sum + value, 0);
   setCellBaseValueByRowCol(worksheet, rowMap["中心办件"], 15, centerTotal);
+  updateReportDateCells(worksheet, generatedAt);
 }
 
-function fillRegionSheet(worksheet, region, data, bounds) {
+function fillRegionSheet(worksheet, region, data, bounds, generatedAt = new Date()) {
   worksheet.getCell("A3").value = updateHeaderText(worksheet.getCell("A3").value, `${bounds.year}年${bounds.month}月`);
-  const rowMap = buildRowMap(worksheet, "B");
+  const rowMap = buildRegionRowMap(worksheet);
   const current = data.regionMonthOutletGroup.get(region) || new Map();
   const ytd = data.regionYtdOutletGroup.get(region) || new Map();
   const previous = data.regionPrevOutletGroup.get(region) || new Map();
 
   for (const [outletName, row] of rowMap.entries()) {
-    if (["网点名称", "归集", "提取", "贷款", "贷后", "合计", "小计"].includes(outletName)) continue;
+    if (outletName === "小计" || outletName === "合计") continue;
     const currentGroup = current.get(outletName) || new Map();
     const ytdGroup = ytd.get(outletName) || new Map();
     const prevGroup = previous.get(outletName) || new Map();
@@ -446,22 +490,40 @@ function fillRegionSheet(worksheet, region, data, bounds) {
     setCellBaseValueByRowCol(worksheet, row, 10, totalForGroups(ytdGroup));
   }
 
-  const centerRow = Array.from({ length: worksheet.rowCount }, (_, idx) => idx + 1).find((row) => worksheet.getCell(`A${row}`).value === "中心");
-  if (centerRow) {
-    const centerName = CENTER_NAME_BY_REGION[region];
-    const currentGroup = current.get(centerName) || new Map();
-    const ytdGroup = ytd.get(centerName) || new Map();
-    const prevGroup = previous.get(centerName) || new Map();
-    SUMMARY_GROUP_ORDER.forEach((group, idx) => {
-      setCellBaseValueByRowCol(worksheet, centerRow, 3 + idx, currentGroup.get(group) || 0);
-    });
-    setCellBaseValueByRowCol(worksheet, centerRow, 7, totalForGroups(currentGroup));
-    setCellBaseValueByRowCol(worksheet, centerRow, 9, safeRatio(totalForGroups(currentGroup) - totalForGroups(prevGroup), totalForGroups(prevGroup)));
-    setCellBaseValueByRowCol(worksheet, centerRow, 10, totalForGroups(ytdGroup));
+  const centerName = CENTER_NAME_BY_REGION[region];
+  const centerRow = rowMap.get(centerName);
+  const subtotalRow = rowMap.get("小计");
+  const totalRow = Array.from({ length: worksheet.rowCount }, (_, idx) => idx + 1).find((row) => textFromCellValue(worksheet.getCell(`A${row}`).value).trim() === "合计");
+
+  if (subtotalRow) {
+    const bankRows = [...rowMap.entries()]
+      .filter(([name]) => name !== centerName && name !== "小计" && name !== "合计")
+      .map(([, row]) => row);
+    for (let col = 3; col <= 10; col += 1) {
+      setCellBaseValueByRowCol(
+        worksheet,
+        subtotalRow,
+        col,
+        bankRows.reduce((sum, row) => sum + (Number(worksheet.getCell(row, col).value) || 0), 0)
+      );
+    }
   }
+
+  if (totalRow && centerRow && subtotalRow) {
+    for (let col = 3; col <= 10; col += 1) {
+      setCellBaseValueByRowCol(
+        worksheet,
+        totalRow,
+        col,
+        (Number(worksheet.getCell(centerRow, col).value) || 0) + (Number(worksheet.getCell(subtotalRow, col).value) || 0)
+      );
+    }
+  }
+
+  updateReportDateCells(worksheet, generatedAt);
 }
 
-function fillRankingSheet(worksheet, data, bounds) {
+function fillRankingSheet(worksheet, data, bounds, generatedAt = new Date()) {
   worksheet.getCell("A2").value = updateHeaderText(worksheet.getCell("A2").value, `${bounds.year}年${bounds.month}月`);
   const monthTotals = [];
   const ytdTotals = [];
@@ -494,9 +556,10 @@ function fillRankingSheet(worksheet, data, bounds) {
     setCellBaseValueByRowCol(worksheet, row, 5, name ? ytdMap.get(name) || 0 : null);
     setCellBaseValueByRowCol(worksheet, row, 7, name ? ytdRank.get(name) || null : null);
   }
+  updateReportDateCells(worksheet, generatedAt);
 }
 
-function fillShareSheet(worksheet, data, bounds) {
+function fillShareSheet(worksheet, data, bounds, generatedAt = new Date()) {
   worksheet.getCell("A2").value = updateHeaderText(worksheet.getCell("A2").value, `${bounds.year}年${bounds.month}月`);
   const bankCounts = new Map(BANK_ORDER.map((bank) => [bank, new Map()]));
   const centerCounts = new Map();
@@ -540,6 +603,7 @@ function fillShareSheet(worksheet, data, bounds) {
     setCellBaseValueByRowCol(worksheet, rowMap["中心办件"], 3 + idx, centerCounts.get(group) || 0);
   });
   setCellBaseValueByRowCol(worksheet, rowMap["中心办件"], 7, totalForGroups(centerCounts));
+  updateReportDateCells(worksheet, generatedAt);
 }
 
 function fillChannelSheet(worksheet, data, bounds) {
@@ -557,6 +621,12 @@ function fillChannelSheet(worksheet, data, bounds) {
     setCellBaseValueByRowCol(worksheet, row, 11, timeMap.get("工作时间") || 0);
     setCellBaseValueByRowCol(worksheet, row, 12, timeMap.get("中午时间") || 0);
     setCellBaseValueByRowCol(worksheet, row, 13, timeMap.get("非工作时间") || 0);
+  }
+  const totalRow = 44;
+  for (let col = 3; col <= 13; col += 1) {
+    const total = Array.from({ length: totalRow - 5 }, (_, index) => 5 + index)
+      .reduce((sum, row) => sum + (Number(worksheet.getCell(row, col).value) || 0), 0);
+    setCellBaseValueByRowCol(worksheet, totalRow, col, total);
   }
 }
 
@@ -577,22 +647,30 @@ function fillReviewerSheet(worksheet, data) {
   }
 
   const totalRows = [
-    [3, 19, 20],
-    [22, 33, 34],
-    [36, 36, 37],
-    [39, 43, 44],
-    [46, 49, 50]
+    [3, 19, 20, 21],
+    [22, 33, 34, 35],
+    [36, 36, 37, 38],
+    [39, 43, 44, 45],
+    [46, 49, 50, 51]
   ];
-  for (const [start, end, totalRow] of totalRows) {
+  for (const [start, end, totalRow, ratioRow] of totalRows) {
     for (let col = 3; col <= 9; col += 1) {
       let total = 0;
       for (let row = start; row <= end; row += 1) total += worksheet.getCell(row, col).value || 0;
       setCellBaseValueByRowCol(worksheet, totalRow, col, total);
     }
+    const groupTotal = Number(worksheet.getCell(totalRow, 9).value) || 0;
+    for (let col = 3; col <= 9; col += 1) {
+      setCellBaseValueByRowCol(worksheet, ratioRow, col, safeRatio(Number(worksheet.getCell(totalRow, col).value) || 0, groupTotal));
+    }
   }
   for (let col = 3; col <= 9; col += 1) {
-    const total = [20, 34, 37, 44, 50].reduce((sum, row) => sum + (worksheet.getCell(row, col).value || 0), 0);
+    const total = [20, 34, 37, 44, 50].reduce((sum, row) => sum + (Number(worksheet.getCell(row, col).value) || 0), 0);
     setCellBaseValueByRowCol(worksheet, 52, col, total);
+  }
+  const grandTotal = Number(worksheet.getCell(52, 9).value) || 0;
+  for (let col = 3; col <= 9; col += 1) {
+    setCellBaseValueByRowCol(worksheet, 53, col, safeRatio(Number(worksheet.getCell(52, col).value) || 0, grandTotal));
   }
 }
 
@@ -650,15 +728,17 @@ function cloneWorksheetToWorkbook(sourceSheet, targetWorkbook) {
 async function writeReportFile({ templatePath, outputPath, report, sheetName, sheetOnly }) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(templatePath);
+  workbook.calcProperties.fullCalcOnLoad = true;
+  const generatedAt = new Date();
   const requestedSheets = sheetName ? new Set([sheetName]) : new Set(REPORT_SHEETS);
 
-  if (requestedSheets.has("总表")) maybeFillSheet(workbook, "总表", (ws) => fillTotalSheet(ws, report.data, report.bounds));
-  if (requestedSheets.has("市本级")) maybeFillSheet(workbook, "市本级", (ws) => fillRegionSheet(ws, "市本级", report.data, report.bounds));
-  if (requestedSheets.has("东港")) maybeFillSheet(workbook, "东港", (ws) => fillRegionSheet(ws, "东港", report.data, report.bounds));
-  if (requestedSheets.has("凤城")) maybeFillSheet(workbook, "凤城", (ws) => fillRegionSheet(ws, "凤城", report.data, report.bounds));
-  if (requestedSheets.has("宽甸")) maybeFillSheet(workbook, "宽甸", (ws) => fillRegionSheet(ws, "宽甸", report.data, report.bounds));
-  if (requestedSheets.has("排名")) maybeFillSheet(workbook, "排名", (ws) => fillRankingSheet(ws, report.data, report.bounds));
-  if (requestedSheets.has("占比")) maybeFillSheet(workbook, "占比", (ws) => fillShareSheet(ws, report.data, report.bounds));
+  if (requestedSheets.has("总表")) maybeFillSheet(workbook, "总表", (ws) => fillTotalSheet(ws, report.data, report.bounds, generatedAt));
+  if (requestedSheets.has("市本级")) maybeFillSheet(workbook, "市本级", (ws) => fillRegionSheet(ws, "市本级", report.data, report.bounds, generatedAt));
+  if (requestedSheets.has("东港")) maybeFillSheet(workbook, "东港", (ws) => fillRegionSheet(ws, "东港", report.data, report.bounds, generatedAt));
+  if (requestedSheets.has("凤城")) maybeFillSheet(workbook, "凤城", (ws) => fillRegionSheet(ws, "凤城", report.data, report.bounds, generatedAt));
+  if (requestedSheets.has("宽甸")) maybeFillSheet(workbook, "宽甸", (ws) => fillRegionSheet(ws, "宽甸", report.data, report.bounds, generatedAt));
+  if (requestedSheets.has("排名")) maybeFillSheet(workbook, "排名", (ws) => fillRankingSheet(ws, report.data, report.bounds, generatedAt));
+  if (requestedSheets.has("占比")) maybeFillSheet(workbook, "占比", (ws) => fillShareSheet(ws, report.data, report.bounds, generatedAt));
   if (requestedSheets.has("各渠道复核业务来源统计")) maybeFillSheet(workbook, "各渠道复核业务来源统计", (ws) => fillChannelSheet(ws, report.data, report.bounds));
   if (requestedSheets.has(" 复核业务量统计")) maybeFillSheet(workbook, " 复核业务量统计", (ws) => fillReviewerSheet(ws, report.data));
 
@@ -667,6 +747,7 @@ async function writeReportFile({ templatePath, outputPath, report, sheetName, sh
     const selected = workbook.getWorksheet(sheetName);
     if (!selected) throw new Error(`sheet not found: ${sheetName}`);
     const singleWorkbook = new ExcelJS.Workbook();
+    singleWorkbook.calcProperties.fullCalcOnLoad = true;
     cloneWorksheetToWorkbook(selected, singleWorkbook);
     await ensureParentDir(outputPath);
     await singleWorkbook.xlsx.writeFile(outputPath);
@@ -724,6 +805,13 @@ module.exports = {
 };
 
 module.exports.__test__ = {
+  fillChannelSheet,
+  fillRegionSheet,
+  fillReviewerSheet,
+  fillTotalSheet,
   compileContext,
-  matchOutlet
+  formatReportDate,
+  matchOutlet,
+  textFromCellValue,
+  buildRegionRowMap
 };
