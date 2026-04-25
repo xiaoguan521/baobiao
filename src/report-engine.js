@@ -84,6 +84,24 @@ function textFromCellValue(value) {
   return String(value);
 }
 
+function numericFromCellValue(value) {
+  if (value == null) return 0;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value === "object") {
+    if (Object.prototype.hasOwnProperty.call(value, "result")) {
+      return numericFromCellValue(value.result);
+    }
+    if (Object.prototype.hasOwnProperty.call(value, "text")) {
+      return numericFromCellValue(value.text);
+    }
+  }
+  return 0;
+}
+
 function createTopCollector(limit) {
   return {
     limit,
@@ -190,6 +208,7 @@ function safeRatio(numerator, denominator) {
 
 function isFormulaValue(value) {
   if (value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "formula")) return true;
+  if (value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "sharedFormula")) return true;
   if (typeof value === "string" && value.startsWith("=")) return true;
   return false;
 }
@@ -203,6 +222,17 @@ function setCellBaseValue(worksheet, address, value) {
 function setCellBaseValueByRowCol(worksheet, row, col, value) {
   const cell = worksheet.getCell(row, col);
   if (isFormulaValue(cell.value)) return;
+  cell.value = value == null ? null : value;
+}
+
+function setCellComputedValueByRowCol(worksheet, row, col, value) {
+  const cell = worksheet.getCell(row, col);
+  if (cell.value && typeof cell.value === "object") {
+    if (Object.prototype.hasOwnProperty.call(cell.value, "formula") || Object.prototype.hasOwnProperty.call(cell.value, "sharedFormula")) {
+      cell.value = { ...cell.value, result: value == null ? null : value };
+      return;
+    }
+  }
   cell.value = value == null ? null : value;
 }
 
@@ -443,30 +473,59 @@ function fillTotalSheet(worksheet, data, bounds, generatedAt = new Date()) {
     "大连银行": 21,
     "交通银行": 24,
     "中国银行": 27,
-    "中心办件": 33
+    "银行办件": 30,
+    "中心办件": 33,
+    "办件总数合计": 36
   };
+  const monthKeys = Array.from({ length: 12 }, (_, index) => `${bounds.year}-${String(index + 1).padStart(2, "0")}`);
+  const runningBank = Object.fromEntries(BANK_ORDER.map((bank) => [bank, 0]));
+  let runningCenter = 0;
 
   for (let monthNumber = 1; monthNumber <= 12; monthNumber += 1) {
-    const monthKey = `${bounds.year}-${String(monthNumber).padStart(2, "0")}`;
+    const monthKey = monthKeys[monthNumber - 1];
     const col = 2 + monthNumber;
     const shouldFillMonth = monthNumber <= bounds.month;
     const bankBucket = data.monthlyBankTotals.get(monthKey) || new Map();
+    const bankTotal = BANK_ORDER.reduce((sum, bank) => sum + (bankBucket.get(bank) || 0), 0);
+    const totalValue = data.monthlyAllTotals.get(monthKey) || 0;
+    const centerValue = data.monthlyCenterTotals.get(monthKey) || 0;
+    const prevMonthKey = monthNumber > 1 ? monthKeys[monthNumber - 2] : null;
+    const prevBankBucket = prevMonthKey ? data.monthlyBankTotals.get(prevMonthKey) || new Map() : new Map();
+    const prevBankTotal = BANK_ORDER.reduce((sum, bank) => sum + (prevBankBucket.get(bank) || 0), 0);
+    const prevCenterValue = prevMonthKey ? data.monthlyCenterTotals.get(prevMonthKey) || 0 : 0;
+
     for (const bank of BANK_ORDER) {
-      setCellBaseValueByRowCol(worksheet, rowMap[bank], col, shouldFillMonth ? bankBucket.get(bank) || 0 : null);
+      const value = shouldFillMonth ? bankBucket.get(bank) || 0 : null;
+      if (value != null) runningBank[bank] += value;
+      setCellComputedValueByRowCol(worksheet, rowMap[bank], col, value);
+      setCellComputedValueByRowCol(worksheet, rowMap[bank] + 1, col, shouldFillMonth ? safeRatio(value || 0, bankTotal) : null);
+      setCellComputedValueByRowCol(worksheet, rowMap[bank] + 2, col, shouldFillMonth ? safeRatio(value || 0, totalValue) : null);
     }
-    setCellBaseValueByRowCol(worksheet, rowMap["中心办件"], col, shouldFillMonth ? data.monthlyCenterTotals.get(monthKey) || 0 : null);
+    if (shouldFillMonth) runningCenter += centerValue;
+    setCellComputedValueByRowCol(worksheet, rowMap["银行办件"], col, shouldFillMonth ? bankTotal : null);
+    setCellComputedValueByRowCol(worksheet, rowMap["银行办件"] + 1, col, shouldFillMonth ? safeRatio(bankTotal, totalValue) : null);
+    setCellComputedValueByRowCol(worksheet, rowMap["银行办件"] + 2, col, shouldFillMonth ? safeRatio(bankTotal - prevBankTotal, prevBankTotal) : null);
+    setCellComputedValueByRowCol(worksheet, rowMap["中心办件"], col, shouldFillMonth ? centerValue : null);
+    setCellComputedValueByRowCol(worksheet, rowMap["中心办件"] + 1, col, shouldFillMonth ? safeRatio(centerValue, totalValue) : null);
+    setCellComputedValueByRowCol(worksheet, rowMap["中心办件"] + 2, col, shouldFillMonth ? safeRatio(centerValue - prevCenterValue, prevCenterValue) : null);
+    setCellComputedValueByRowCol(worksheet, rowMap["办件总数合计"], col, shouldFillMonth ? totalValue : null);
   }
 
+  const cumulativeBankTotal = BANK_ORDER.reduce((sum, bank) => sum + runningBank[bank], 0);
+  const cumulativeTotal = cumulativeBankTotal + runningCenter;
   for (const bank of BANK_ORDER) {
-    const total = Array.from(data.monthlyBankTotals.entries())
-      .filter(([monthKey]) => Number(monthKey.slice(5, 7)) <= bounds.month)
-      .reduce((sum, [, monthMap]) => sum + (monthMap.get(bank) || 0), 0);
-    setCellBaseValueByRowCol(worksheet, rowMap[bank], 15, total);
+    const total = runningBank[bank];
+    setCellComputedValueByRowCol(worksheet, rowMap[bank], 15, total);
+    setCellComputedValueByRowCol(worksheet, rowMap[bank] + 1, 15, safeRatio(total, cumulativeBankTotal));
+    setCellComputedValueByRowCol(worksheet, rowMap[bank] + 2, 15, safeRatio(total, cumulativeTotal));
   }
-  const centerTotal = Array.from(data.monthlyCenterTotals.entries())
-    .filter(([monthKey]) => Number(monthKey.slice(5, 7)) <= bounds.month)
-    .reduce((sum, [, value]) => sum + value, 0);
-  setCellBaseValueByRowCol(worksheet, rowMap["中心办件"], 15, centerTotal);
+  setCellComputedValueByRowCol(worksheet, rowMap["银行办件"], 15, cumulativeBankTotal);
+  setCellComputedValueByRowCol(worksheet, rowMap["银行办件"] + 1, 15, safeRatio(cumulativeBankTotal, cumulativeTotal));
+  setCellComputedValueByRowCol(worksheet, rowMap["银行办件"] + 2, 15, null);
+  setCellComputedValueByRowCol(worksheet, rowMap["中心办件"], 15, runningCenter);
+  setCellComputedValueByRowCol(worksheet, rowMap["中心办件"] + 1, 15, safeRatio(runningCenter, cumulativeTotal));
+  setCellComputedValueByRowCol(worksheet, rowMap["中心办件"] + 2, 15, null);
+  setCellComputedValueByRowCol(worksheet, rowMap["办件总数合计"], 15, cumulativeTotal);
   updateReportDateCells(worksheet, generatedAt);
 }
 
@@ -476,6 +535,8 @@ function fillRegionSheet(worksheet, region, data, bounds, generatedAt = new Date
   const current = data.regionMonthOutletGroup.get(region) || new Map();
   const ytd = data.regionYtdOutletGroup.get(region) || new Map();
   const previous = data.regionPrevOutletGroup.get(region) || new Map();
+  const totalRegionCurrent = Array.from(current.values()).reduce((sum, groupMap) => sum + totalForGroups(groupMap), 0);
+  const totalRegionYtd = Array.from(ytd.values()).reduce((sum, groupMap) => sum + totalForGroups(groupMap), 0);
 
   for (const [outletName, row] of rowMap.entries()) {
     if (outletName === "小计" || outletName === "合计") continue;
@@ -483,11 +544,16 @@ function fillRegionSheet(worksheet, region, data, bounds, generatedAt = new Date
     const ytdGroup = ytd.get(outletName) || new Map();
     const prevGroup = previous.get(outletName) || new Map();
     SUMMARY_GROUP_ORDER.forEach((group, idx) => {
-      setCellBaseValueByRowCol(worksheet, row, 3 + idx, currentGroup.get(group) || 0);
+      setCellComputedValueByRowCol(worksheet, row, 3 + idx, currentGroup.get(group) || 0);
     });
-    setCellBaseValueByRowCol(worksheet, row, 7, totalForGroups(currentGroup));
-    setCellBaseValueByRowCol(worksheet, row, 9, safeRatio(totalForGroups(currentGroup) - totalForGroups(prevGroup), totalForGroups(prevGroup)));
-    setCellBaseValueByRowCol(worksheet, row, 10, totalForGroups(ytdGroup));
+    const currentTotal = totalForGroups(currentGroup);
+    const previousTotal = totalForGroups(prevGroup);
+    const ytdTotal = totalForGroups(ytdGroup);
+    setCellComputedValueByRowCol(worksheet, row, 7, currentTotal);
+    setCellComputedValueByRowCol(worksheet, row, 8, safeRatio(currentTotal, totalRegionCurrent));
+    setCellComputedValueByRowCol(worksheet, row, 9, safeRatio(currentTotal - previousTotal, previousTotal));
+    setCellComputedValueByRowCol(worksheet, row, 10, ytdTotal);
+    setCellComputedValueByRowCol(worksheet, row, 11, safeRatio(ytdTotal, totalRegionYtd));
   }
 
   const centerName = CENTER_NAME_BY_REGION[region];
@@ -499,25 +565,39 @@ function fillRegionSheet(worksheet, region, data, bounds, generatedAt = new Date
     const bankRows = [...rowMap.entries()]
       .filter(([name]) => name !== centerName && name !== "小计" && name !== "合计")
       .map(([, row]) => row);
-    for (let col = 3; col <= 10; col += 1) {
-      setCellBaseValueByRowCol(
+    const subtotalCurrent = bankRows.reduce((sum, row) => sum + numericFromCellValue(worksheet.getCell(row, 7).value), 0);
+    const subtotalPrevious = [...rowMap.entries()]
+      .filter(([name]) => name !== centerName && name !== "小计" && name !== "合计")
+      .reduce((sum, [name]) => sum + totalForGroups(previous.get(name) || new Map()), 0);
+    const subtotalYtd = bankRows.reduce((sum, row) => sum + numericFromCellValue(worksheet.getCell(row, 10).value), 0);
+    for (let col = 3; col <= 6; col += 1) {
+      setCellComputedValueByRowCol(
         worksheet,
         subtotalRow,
         col,
-        bankRows.reduce((sum, row) => sum + (Number(worksheet.getCell(row, col).value) || 0), 0)
+        bankRows.reduce((sum, row) => sum + numericFromCellValue(worksheet.getCell(row, col).value), 0)
       );
     }
+    setCellComputedValueByRowCol(worksheet, subtotalRow, 7, subtotalCurrent);
+    setCellComputedValueByRowCol(worksheet, subtotalRow, 8, safeRatio(subtotalCurrent, totalRegionCurrent));
+    setCellComputedValueByRowCol(worksheet, subtotalRow, 9, safeRatio(subtotalCurrent - subtotalPrevious, subtotalPrevious));
+    setCellComputedValueByRowCol(worksheet, subtotalRow, 10, subtotalYtd);
+    setCellComputedValueByRowCol(worksheet, subtotalRow, 11, safeRatio(subtotalYtd, totalRegionYtd));
   }
 
   if (totalRow && centerRow && subtotalRow) {
-    for (let col = 3; col <= 10; col += 1) {
-      setCellBaseValueByRowCol(
+    for (let col = 3; col <= 7; col += 1) {
+      setCellComputedValueByRowCol(
         worksheet,
         totalRow,
         col,
-        (Number(worksheet.getCell(centerRow, col).value) || 0) + (Number(worksheet.getCell(subtotalRow, col).value) || 0)
+        numericFromCellValue(worksheet.getCell(centerRow, col).value) + numericFromCellValue(worksheet.getCell(subtotalRow, col).value)
       );
     }
+    setCellComputedValueByRowCol(worksheet, totalRow, 8, null);
+    setCellComputedValueByRowCol(worksheet, totalRow, 9, null);
+    setCellComputedValueByRowCol(worksheet, totalRow, 10, numericFromCellValue(worksheet.getCell(centerRow, 10).value) + numericFromCellValue(worksheet.getCell(subtotalRow, 10).value));
+    setCellComputedValueByRowCol(worksheet, totalRow, 11, null);
   }
 
   updateReportDateCells(worksheet, generatedAt);
@@ -525,6 +605,8 @@ function fillRegionSheet(worksheet, region, data, bounds, generatedAt = new Date
 
 function fillRankingSheet(worksheet, data, bounds, generatedAt = new Date()) {
   worksheet.getCell("A2").value = updateHeaderText(worksheet.getCell("A2").value, `${bounds.year}年${bounds.month}月`);
+  setCellBaseValueByRowCol(worksheet, 3, 2, `${bounds.month}月办理业务数量`);
+  setCellBaseValueByRowCol(worksheet, 3, 3, `${bounds.month}月办理业务数量`);
   const monthTotals = [];
   const ytdTotals = [];
 
@@ -546,7 +628,12 @@ function fillRankingSheet(worksheet, data, bounds, generatedAt = new Date()) {
   const names = [...new Set([...currentMap.keys(), ...ytdMap.keys()])];
   const currentRank = new Map([...names].sort((a, b) => (currentMap.get(b) || 0) - (currentMap.get(a) || 0) || a.localeCompare(b)).map((name, index) => [name, index + 1]));
   const ytdRank = new Map([...names].sort((a, b) => (ytdMap.get(b) || 0) - (ytdMap.get(a) || 0) || a.localeCompare(b)).map((name, index) => [name, index + 1]));
-  const ranked = [...names].sort((a, b) => (ytdMap.get(b) || 0) - (ytdMap.get(a) || 0) || (currentMap.get(b) || 0) - (currentMap.get(a) || 0) || a.localeCompare(b));
+  const ranked = [...names].sort(
+    (a, b) =>
+      (currentMap.get(b) || 0) - (currentMap.get(a) || 0) ||
+      (ytdMap.get(b) || 0) - (ytdMap.get(a) || 0) ||
+      a.localeCompare(b)
+  );
 
   for (let row = 4; row <= 23; row += 1) {
     const name = ranked[row - 4];
@@ -807,11 +894,13 @@ module.exports = {
 module.exports.__test__ = {
   fillChannelSheet,
   fillRegionSheet,
+  fillRankingSheet,
   fillReviewerSheet,
   fillTotalSheet,
   compileContext,
   formatReportDate,
   matchOutlet,
   textFromCellValue,
+  numericFromCellValue,
   buildRegionRowMap
 };
