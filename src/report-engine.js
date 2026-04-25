@@ -19,6 +19,14 @@ const {
   WORK_TIME
 } = require("./report-rules");
 
+const EXCLUDED_ZBMBH_FOR_NON_CHANNEL_REPORTS = new Set([
+  "2106032001",
+  "210603200102",
+  "210603200103",
+  "210603200104",
+  "210603200105"
+]);
+
 function compileContext() {
   return {
     businessRules: BUSINESS_RULES.map((item) => ({ ...item })),
@@ -241,6 +249,62 @@ function setCellPercentValueByRowCol(worksheet, row, col, value) {
   worksheet.getCell(row, col).numFmt = "0.00%";
 }
 
+function shouldExcludeFromNonChannelReports(zbmbh) {
+  return EXCLUDED_ZBMBH_FOR_NON_CHANNEL_REPORTS.has(String(zbmbh || "").trim());
+}
+
+function accumulateClassifiedRecord(data, bounds, {
+  dt,
+  monthKey,
+  region,
+  rule,
+  outlet,
+  bankName,
+  channel,
+  spr,
+  excludeFromNonChannelReports
+}) {
+  if (monthKey === bounds.monthKey) {
+    const channelBucket = classifyChannel(channel);
+    getNestedCount(data.channelItemCounts, [rule.item, channelBucket]);
+    getNestedCount(data.channelItemTimeCounts, [rule.item, classifyTimeBucket(dt)]);
+  }
+
+  if (excludeFromNonChannelReports) return;
+
+  if (dt.getFullYear() === bounds.year) {
+    data.monthlyAllTotals.set(monthKey, (data.monthlyAllTotals.get(monthKey) || 0) + 1);
+    if (bankName) {
+      if (!data.monthlyBankTotals.has(monthKey)) data.monthlyBankTotals.set(monthKey, new Map());
+      const bucket = data.monthlyBankTotals.get(monthKey);
+      bucket.set(bankName, (bucket.get(bankName) || 0) + 1);
+    } else {
+      data.monthlyCenterTotals.set(monthKey, (data.monthlyCenterTotals.get(monthKey) || 0) + 1);
+    }
+  }
+
+  if (rule.summaryGroup && monthKey === bounds.monthKey) {
+    const bucketOutlet = outlet || CENTER_NAME_BY_REGION[region];
+    getNestedCount(data.regionMonthOutletGroup, [region, bucketOutlet, rule.summaryGroup]);
+  }
+
+  if (rule.summaryGroup && dt.getFullYear() === bounds.year) {
+    const bucketOutlet = outlet || CENTER_NAME_BY_REGION[region];
+    getNestedCount(data.regionYtdOutletGroup, [region, bucketOutlet, rule.summaryGroup]);
+  }
+
+  if (rule.summaryGroup && monthKey === bounds.prevMonthKey) {
+    const bucketOutlet = outlet || CENTER_NAME_BY_REGION[region];
+    getNestedCount(data.regionPrevOutletGroup, [region, bucketOutlet, rule.summaryGroup]);
+  }
+
+  if (monthKey === bounds.monthKey) {
+    for (const reviewer of splitReviewers(spr)) {
+      getNestedCount(data.reviewerItemCounts, [rule.item, reviewer]);
+    }
+  }
+}
+
 async function collectReportData({ month, dbConfig }) {
   const bounds = parseMonthBounds(month);
   const context = compileContext();
@@ -257,7 +321,8 @@ async function collectReportData({ month, dbConfig }) {
         trim(nvl(dx_05_dxcjqd, ' ')),
         nvl(dx_05_spr, ' '),
         nvl(dx_05_glb, ' '),
-        nvl(dx_05_dxcjzmc, ' ')
+        nvl(dx_05_dxcjzmc, ' '),
+        trim(nvl(dx_05_zbmbh, ' '))
       from PT_DXSL_2106032001_05
       where dx_05_dxcjsj >= :start_time
         and dx_05_dxcjsj < :end_time
@@ -275,13 +340,14 @@ async function collectReportData({ month, dbConfig }) {
       if (!rows.length) break;
       for (const row of rows) {
         stats.scannedRows += 1;
-        const [dt, rawDxmc, rawDxms, rawChannel, rawSpr, rawGlb, rawCreator] = row;
+        const [dt, rawDxmc, rawDxms, rawChannel, rawSpr, rawGlb, rawCreator, rawZbmbh] = row;
         const dxmc = String(rawDxmc || "").trim();
         const dxms = String(rawDxms || "").trim();
         const channel = String(rawChannel || "").trim();
         const spr = String(rawSpr || "").trim();
         const glb = String(rawGlb || "").trim();
         const creator = String(rawCreator || "").trim();
+        const zbmbh = String(rawZbmbh || "").trim();
         const region = REGION_NAME_BY_CODE[glb];
         if (!region || !(dt instanceof Date)) continue;
 
@@ -302,40 +368,17 @@ async function collectReportData({ month, dbConfig }) {
         }
 
         const monthKey = formatMonthKey(dt);
-        if (dt.getFullYear() === bounds.year) {
-          data.monthlyAllTotals.set(monthKey, (data.monthlyAllTotals.get(monthKey) || 0) + 1);
-          if (bankName) {
-            if (!data.monthlyBankTotals.has(monthKey)) data.monthlyBankTotals.set(monthKey, new Map());
-            const bucket = data.monthlyBankTotals.get(monthKey);
-            bucket.set(bankName, (bucket.get(bankName) || 0) + 1);
-          } else {
-            data.monthlyCenterTotals.set(monthKey, (data.monthlyCenterTotals.get(monthKey) || 0) + 1);
-          }
-        }
-
-        if (rule.summaryGroup && monthKey === bounds.monthKey) {
-          const bucketOutlet = outlet || CENTER_NAME_BY_REGION[region];
-          getNestedCount(data.regionMonthOutletGroup, [region, bucketOutlet, rule.summaryGroup]);
-        }
-
-        if (rule.summaryGroup && dt.getFullYear() === bounds.year) {
-          const bucketOutlet = outlet || CENTER_NAME_BY_REGION[region];
-          getNestedCount(data.regionYtdOutletGroup, [region, bucketOutlet, rule.summaryGroup]);
-        }
-
-        if (rule.summaryGroup && monthKey === bounds.prevMonthKey) {
-          const bucketOutlet = outlet || CENTER_NAME_BY_REGION[region];
-          getNestedCount(data.regionPrevOutletGroup, [region, bucketOutlet, rule.summaryGroup]);
-        }
-
-        if (monthKey === bounds.monthKey) {
-          const channelBucket = classifyChannel(channel);
-          getNestedCount(data.channelItemCounts, [rule.item, channelBucket]);
-          getNestedCount(data.channelItemTimeCounts, [rule.item, classifyTimeBucket(dt)]);
-          for (const reviewer of splitReviewers(spr)) {
-            getNestedCount(data.reviewerItemCounts, [rule.item, reviewer]);
-          }
-        }
+        accumulateClassifiedRecord(data, bounds, {
+          dt,
+          monthKey,
+          region,
+          rule,
+          outlet,
+          bankName,
+          channel,
+          spr,
+          excludeFromNonChannelReports: shouldExcludeFromNonChannelReports(zbmbh)
+        });
       }
     }
     await rs.close();
@@ -926,11 +969,13 @@ module.exports.__test__ = {
   fillReviewerSheet,
   fillTotalSheet,
   sanitizeWorksheetFormulaErrors,
+  accumulateClassifiedRecord,
   compileContext,
   formatReportDate,
   matchOutlet,
   textFromCellValue,
   numericFromCellValue,
   buildRegionRowMap,
+  shouldExcludeFromNonChannelReports,
   wrapFormulaWithIfError
 };

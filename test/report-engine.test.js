@@ -158,6 +158,72 @@ test("fill channel sheet populates total row", () => {
   assert.equal(worksheet.getCell("M44").value, 5);
 });
 
+test("zbmbh exclusion applies to non-channel reports only", () => {
+  const bounds = {
+    year: 2026,
+    month: 4,
+    monthKey: "2026-04",
+    prevMonthKey: "2026-03"
+  };
+  const rule = { item: "单位住房公积金缴存登记", summaryGroup: "归集" };
+  const excludedData = {
+    monthlyBankTotals: new Map(),
+    monthlyCenterTotals: new Map(),
+    monthlyAllTotals: new Map(),
+    regionMonthOutletGroup: new Map(),
+    regionYtdOutletGroup: new Map(),
+    regionPrevOutletGroup: new Map(),
+    channelItemCounts: new Map(),
+    channelItemTimeCounts: new Map(),
+    reviewerItemCounts: new Map()
+  };
+
+  __test__.accumulateClassifiedRecord(excludedData, bounds, {
+    dt: new Date("2026-04-10T10:00:00Z"),
+    monthKey: "2026-04",
+    region: "东港",
+    rule,
+    outlet: "工行东港支行",
+    bankName: "工商银行",
+    channel: "柜面",
+    spr: "李俊昌",
+    excludeFromNonChannelReports: __test__.shouldExcludeFromNonChannelReports("2106032001")
+  });
+
+  assert.equal(excludedData.channelItemCounts.get("单位住房公积金缴存登记").get("柜面"), 1);
+  assert.equal(excludedData.monthlyAllTotals.size, 0);
+  assert.equal(excludedData.reviewerItemCounts.size, 0);
+
+  const includedData = {
+    monthlyBankTotals: new Map(),
+    monthlyCenterTotals: new Map(),
+    monthlyAllTotals: new Map(),
+    regionMonthOutletGroup: new Map(),
+    regionYtdOutletGroup: new Map(),
+    regionPrevOutletGroup: new Map(),
+    channelItemCounts: new Map(),
+    channelItemTimeCounts: new Map(),
+    reviewerItemCounts: new Map()
+  };
+
+  __test__.accumulateClassifiedRecord(includedData, bounds, {
+    dt: new Date("2026-04-10T10:00:00Z"),
+    monthKey: "2026-04",
+    region: "东港",
+    rule,
+    outlet: "工行东港支行",
+    bankName: "工商银行",
+    channel: "柜面",
+    spr: "李俊昌",
+    excludeFromNonChannelReports: __test__.shouldExcludeFromNonChannelReports("999999")
+  });
+
+  assert.equal(includedData.channelItemCounts.get("单位住房公积金缴存登记").get("柜面"), 1);
+  assert.equal(includedData.monthlyAllTotals.get("2026-04"), 1);
+  assert.equal(includedData.monthlyBankTotals.get("2026-04").get("工商银行"), 1);
+  assert.equal(includedData.reviewerItemCounts.get("单位住房公积金缴存登记").get("李俊昌"), 1);
+});
+
 test("fill region sheet refreshes subtotal and total cached values", () => {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet("东港");
