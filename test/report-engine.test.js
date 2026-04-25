@@ -233,3 +233,20 @@ test("fill ranking sheet updates month column headers", () => {
   assert.equal(worksheet.getCell("B3").value, "3月办理业务数量");
   assert.equal(worksheet.getCell("C3").value, "3月办理业务数量");
 });
+
+test("wrap formula with IFERROR only once", () => {
+  assert.equal(__test__.wrapFormulaWithIfError("A1/B1"), 'IFERROR(A1/B1,"")');
+  assert.equal(__test__.wrapFormulaWithIfError('IFERROR(A1/B1,"")'), 'IFERROR(A1/B1,"")');
+});
+
+test("sanitize worksheet formula errors wraps formula cells", () => {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("总表");
+  worksheet.getCell("A1").value = { formula: "A2/B2", result: { error: "#DIV/0!" } };
+  worksheet.getCell("A2").value = 1;
+  worksheet.getCell("B2").value = 0;
+
+  __test__.sanitizeWorksheetFormulaErrors(worksheet);
+
+  assert.equal(worksheet.getCell("A1").value.formula, 'IFERROR(A2/B2,"")');
+});

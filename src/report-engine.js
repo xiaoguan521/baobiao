@@ -775,6 +775,28 @@ function cloneValue(value) {
   return value;
 }
 
+function wrapFormulaWithIfError(formula) {
+  const text = String(formula || "").trim();
+  if (!text) return text;
+  if (/^IFERROR\s*\(/i.test(text)) return text;
+  return `IFERROR(${text},"")`;
+}
+
+function sanitizeWorksheetFormulaErrors(worksheet) {
+  worksheet.eachRow({ includeEmpty: true }, (row) => {
+    row.eachCell({ includeEmpty: true }, (cell) => {
+      const value = cell.value;
+      if (!value || typeof value !== "object") return;
+      if (Object.prototype.hasOwnProperty.call(value, "formula")) {
+        cell.value = {
+          ...value,
+          formula: wrapFormulaWithIfError(value.formula)
+        };
+      }
+    });
+  });
+}
+
 function cloneWorksheetToWorkbook(sourceSheet, targetWorkbook) {
   const targetSheet = targetWorkbook.addWorksheet(sourceSheet.name, {
     views: sourceSheet.views,
@@ -828,6 +850,7 @@ async function writeReportFile({ templatePath, outputPath, report, sheetName, sh
   if (requestedSheets.has("占比")) maybeFillSheet(workbook, "占比", (ws) => fillShareSheet(ws, report.data, report.bounds, generatedAt));
   if (requestedSheets.has("各渠道复核业务来源统计")) maybeFillSheet(workbook, "各渠道复核业务来源统计", (ws) => fillChannelSheet(ws, report.data, report.bounds));
   if (requestedSheets.has(" 复核业务量统计")) maybeFillSheet(workbook, " 复核业务量统计", (ws) => fillReviewerSheet(ws, report.data));
+  workbook.eachSheet((worksheet) => sanitizeWorksheetFormulaErrors(worksheet));
 
   if (sheetOnly) {
     if (!sheetName) throw new Error("sheetOnly requires sheetName");
@@ -897,10 +920,12 @@ module.exports.__test__ = {
   fillRankingSheet,
   fillReviewerSheet,
   fillTotalSheet,
+  sanitizeWorksheetFormulaErrors,
   compileContext,
   formatReportDate,
   matchOutlet,
   textFromCellValue,
   numericFromCellValue,
-  buildRegionRowMap
+  buildRegionRowMap,
+  wrapFormulaWithIfError
 };
