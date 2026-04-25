@@ -236,6 +236,11 @@ function setCellComputedValueByRowCol(worksheet, row, col, value) {
   cell.value = value == null ? null : value;
 }
 
+function setCellPercentValueByRowCol(worksheet, row, col, value) {
+  setCellBaseValueByRowCol(worksheet, row, col, value);
+  worksheet.getCell(row, col).numFmt = "0.00%";
+}
+
 async function collectReportData({ month, dbConfig }) {
   const bounds = parseMonthBounds(month);
   const context = compileContext();
@@ -748,7 +753,7 @@ function fillReviewerSheet(worksheet, data) {
     }
     const groupTotal = Number(worksheet.getCell(totalRow, 9).value) || 0;
     for (let col = 3; col <= 9; col += 1) {
-      setCellBaseValueByRowCol(worksheet, ratioRow, col, safeRatio(Number(worksheet.getCell(totalRow, col).value) || 0, groupTotal));
+      setCellPercentValueByRowCol(worksheet, ratioRow, col, safeRatio(Number(worksheet.getCell(totalRow, col).value) || 0, groupTotal));
     }
   }
   for (let col = 3; col <= 9; col += 1) {
@@ -757,7 +762,7 @@ function fillReviewerSheet(worksheet, data) {
   }
   const grandTotal = Number(worksheet.getCell(52, 9).value) || 0;
   for (let col = 3; col <= 9; col += 1) {
-    setCellBaseValueByRowCol(worksheet, 53, col, safeRatio(Number(worksheet.getCell(52, col).value) || 0, grandTotal));
+    setCellPercentValueByRowCol(worksheet, 53, col, safeRatio(Number(worksheet.getCell(52, col).value) || 0, grandTotal));
   }
 }
 

@@ -122,8 +122,11 @@ test("fill reviewer sheet populates totals and ratios", () => {
   assert.equal(worksheet.getCell("C21").value, 2 / 3);
   assert.equal(worksheet.getCell("D21").value, 1 / 3);
   assert.equal(worksheet.getCell("I21").value, 1);
+  assert.equal(worksheet.getCell("C21").numFmt, "0.00%");
+  assert.equal(worksheet.getCell("I21").numFmt, "0.00%");
   assert.equal(worksheet.getCell("I52").value, 3);
   assert.equal(worksheet.getCell("C53").value, 2 / 3);
+  assert.equal(worksheet.getCell("C53").numFmt, "0.00%");
 });
 
 test("fill channel sheet populates total row", () => {
